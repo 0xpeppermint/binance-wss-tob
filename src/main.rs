@@ -1,7 +1,4 @@
-//! This program connects to a wss stream on Binance to retrieve best real-time 
-//! bid-ask quotes for the MKRUSDT spot pair along with the current spread. 
-//! Retrieved values are processed and printed on a regular interval on a parallel thread
-
+use clap::{Parser};
 use tokio;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
@@ -10,43 +7,54 @@ use futures_util::{StreamExt, SinkExt};
 use serde_json::Value;
 use chrono::{DateTime, Utc};
 
+/// A simple CLI tool to fetch and print Top of Book data from Binance.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// The interval (in seconds) at which to print the Top of Book data.
+    #[arg(long, default_value_t = 2)]
+    print_interval: u64,
 
-const URL: &str = "wss://stream.binance.com/stream?streams=mkrusdt@bookTicker";
-const PRINT_INTERVAL: Duration = Duration::from_secs(2);
+    /// The ticker symbol to use for the WebSocket stream.
+    #[arg(long, default_value = "btc")]
+    ticker: String,
+}
 
 
-// use tokio async runtime with multithreading
-#[tokio::main(flavor = "multi_thread")] 
-
-// spawns websocket listener and msg processor on a new thread each, kept alive forever 
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    
+    let args = Args::parse();
+    let print_interval = Duration::from_secs(args.print_interval);
+
+    // Construct the WebSocket URL using the specified ticker
+    let ticker_lowercase = args.ticker.to_lowercase();
+    let url = format!("wss://stream.binance.com/stream?streams={}usdt@bookTicker", ticker_lowercase);
+
     let (tx, rx) = mpsc::channel(500);
 
     tokio::spawn(async move {
-        if let Err(e) = websocket_listener(URL, tx).await {
+        if let Err(e) = websocket_listener(&url, tx).await {
             eprintln!("WebSocket error: {}", e);
         }
     });
-    
+
     tokio::spawn(async move {
-        let _ = print_top_of_book(rx).await;
+        let _ = print_top_of_book(rx, print_interval).await;
     });
-    
+
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-/// Spins up a wss stream connection and forwards msgs to the provided channel. 
-/// Sends Poing msgs to keep wss alive
+/// Connects to the WebSocket and forwards messages to the provided channel
 ///
 /// # Inputs
-/// * `url` - wss url to connect to.
-/// * `tx` - sender end of the channel to forward msgs to
-/// 
+/// * `url` - WebSocket URL to connect to
+/// * `tx` - Sender end of the channel to forward messages to
+///
 /// # Returns
-/// A result indicating success or failure.
+/// Result indicating success or failure
 async fn websocket_listener(url: &str, tx: mpsc::Sender<String>) -> Result<(), Box<dyn std::error::Error>> {
     let (mut ws_stream, _) = connect_async(url).await?;
     println!("WebSocket connected");
@@ -55,12 +63,12 @@ async fn websocket_listener(url: &str, tx: mpsc::Sender<String>) -> Result<(), B
         tokio::select! {
             message = ws_stream.next() => {
                 match message {
-                    Some(Ok(Message::Text(text))) => { // forward msgs to the channel 
+                    Some(Ok(Message::Text(text))) => {
                         if let Err(e) = tx.send(text).await {
                             eprintln!("Error sending message through channel: {}", e);
                         }
                     },
-                    Some(Ok(Message::Ping(ping))) => { // send Point to keep websocket connection alive 
+                    Some(Ok(Message::Ping(ping))) => {
                         if let Err(e) = ws_stream.send(Message::Pong(ping)).await {
                             eprintln!("Error responding to ping frame: {}", e);
                             return Err(Box::new(e));
@@ -87,15 +95,15 @@ async fn websocket_listener(url: &str, tx: mpsc::Sender<String>) -> Result<(), B
     }
 }
 
-
-/// Processes incoming wss messages and prints the top of the book at regular intervals.
-/// 
+/// Processes incoming WebSocket messages and prints the top of the book at regular intervals
+///
 /// # Inputs
-/// * `rx` - receiver end of the channel for receiving messages.
-/// 
+/// * `rx` - Receiver end of the channel for receiving messages
+/// * `print_interval` - Duration to wait between prints
+///
 /// # Returns
-/// A result indicating success or failure.
-async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn std::error::Error>> {
+/// Result indicating success or failure
+async fn print_top_of_book(mut rx: mpsc::Receiver<String>, print_interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
     let mut best_bid = 0.0;
     let mut best_ask = 0.0;
     let mut quantity_bid = 0.0;
@@ -114,14 +122,14 @@ async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn
         }   
     }
 
-    let mut print_interval = interval(PRINT_INTERVAL);
+    let mut interval = interval(print_interval);
 
     loop {
         tokio::select! {
-            _ = print_interval.tick() => {
+            _ = interval.tick() => {
                 let now: DateTime<Utc> = Utc::now();
                 let spread_bps = if best_bid > 0.0 && best_ask > 0.0 {
-                    (best_ask - best_bid) / (best_bid) * 10000.0
+                    (best_ask - best_bid) / best_bid * 10000.0
                 } else {
                     0.0
                 };
@@ -145,4 +153,3 @@ async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn
         }
     }
 }
-
