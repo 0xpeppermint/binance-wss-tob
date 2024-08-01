@@ -11,22 +11,22 @@ use chrono::{DateTime, Utc};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// The interval (in seconds) at which to print the Top of Book data.
     #[arg(long, default_value_t = 2)]
     print_interval: u64,
 
-    /// The ticker symbol to use for the WebSocket stream.
     #[arg(long, default_value = "btc")]
     ticker: String,
 }
 
-
+/// Using tokio async runtime with multithreading
 #[tokio::main(flavor = "multi_thread")]
+
+/// Spawn websocket listener and msg processor on different threads
+/// Initializes mscp channel and keep alive forever
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let print_interval = Duration::from_secs(args.print_interval);
 
-    // Construct the WebSocket URL using the specified ticker
     let ticker_lowercase = args.ticker.to_lowercase();
     let url = format!("wss://stream.binance.com/stream?streams={}usdt@bookTicker", ticker_lowercase);
 
