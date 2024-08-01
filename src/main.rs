@@ -1,3 +1,7 @@
+//! This program connects to a wss stream on Binance to retrieve best real-time 
+//! bid-ask quotes for the MKRUSDT spot pair along with the current spread. 
+//! Retrieved values are processed and printed on a regular interval on a parallel thread
+
 use tokio;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
@@ -11,29 +15,38 @@ const URL: &str = "wss://stream.binance.com/stream?streams=mkrusdt@bookTicker";
 const PRINT_INTERVAL: Duration = Duration::from_secs(2);
 
 
-#[tokio::main(flavor = "multi_thread")] // use tokio async runtime with multithreading 
+// use tokio async runtime with multithreading
+#[tokio::main(flavor = "multi_thread")] 
+
+// spawns websocket listener and msg processor on a new thread each, kept alive forever 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let (tx, rx) = mpsc::channel(500);
 
-    // websocket listener
     tokio::spawn(async move {
         if let Err(e) = websocket_listener(URL, tx).await {
             eprintln!("WebSocket error: {}", e);
         }
     });
     
-    // msg processor
     tokio::spawn(async move {
         let _ = print_top_of_book(rx).await;
     });
     
-    // loop to keep main() running
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
+/// Spins up a wss stream connection and forwards msgs to the provided channel. 
+/// Sends Poing msgs to keep wss alive
+///
+/// # Inputs
+/// * `url` - wss url to connect to.
+/// * `tx` - sender end of the channel to forward msgs to
+/// 
+/// # Returns
+/// A result indicating success or failure.
 async fn websocket_listener(url: &str, tx: mpsc::Sender<String>) -> Result<(), Box<dyn std::error::Error>> {
     let (mut ws_stream, _) = connect_async(url).await?;
     println!("WebSocket connected");
@@ -75,15 +88,19 @@ async fn websocket_listener(url: &str, tx: mpsc::Sender<String>) -> Result<(), B
 }
 
 
+/// Processes incoming wss messages and prints the top of the book at regular intervals.
+/// 
+/// # Inputs
+/// * `rx` - receiver end of the channel for receiving messages.
+/// 
+/// # Returns
+/// A result indicating success or failure.
 async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut best_bid = 0.0;
     let mut best_ask = 0.0;
     let mut quantity_bid = 0.0;
     let mut quantity_ask = 0.0;
     let mut ticker = String::new();
-
-
-    // process the first received msg
 
     if let Some(message) = rx.recv().await {
         if let Ok(json) = serde_json::from_str::<Value>(&message) {
@@ -96,9 +113,6 @@ async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn
             }
         }   
     }
-
-
-    // update values with each new msg and print periodically
 
     let mut print_interval = interval(PRINT_INTERVAL);
 
