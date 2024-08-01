@@ -24,7 +24,7 @@ This Rust program connects to the Binance WebSocket stream to retrieve the best 
 
    ```bash
    git clone https://github.com/yourusername/your-repo.git
-   cd path/to/repo
+   cd binance-wss-tob
    ```
    
 
