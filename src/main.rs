@@ -7,7 +7,7 @@ use serde_json::Value;
 use chrono::{DateTime, Utc};
 
 
-const URL: &str = "wss://stream.binance.com/stream?streams=btcusdt@bookTicker";
+const URL: &str = "wss://stream.binance.com/stream?streams=mkrusdt@bookTicker";
 const PRINT_INTERVAL: Duration = Duration::from_secs(2);
 
 
@@ -106,9 +106,15 @@ async fn print_top_of_book(mut rx: mpsc::Receiver<String>) -> Result<(), Box<dyn
         tokio::select! {
             _ = print_interval.tick() => {
                 let now: DateTime<Utc> = Utc::now();
+                let spread_bps = if best_bid > 0.0 && best_ask > 0.0 {
+                    (best_ask - best_bid) / (best_bid) * 10000.0
+                } else {
+                    0.0
+                };
                 println!("[SPOT][{}][{}] Top of Book:", ticker, now.to_rfc3339());
                 println!("Bid: {:.6} @ {:.4}", quantity_bid, best_bid);
                 println!("Ask: {:.6} @ {:.4}", quantity_ask, best_ask);
+                println!("Spread bps: {:.8}", spread_bps);
                 println!("---");
             }
             Some(message) = rx.recv() => {
